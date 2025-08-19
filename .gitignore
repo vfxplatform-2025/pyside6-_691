@@ -1,0 +1,12 @@
+build/
+buildAll/
+source/
+*.log
+*.tmp
+*~
+.DS_Store
+__pycache__/
+*.py[cod]
+CMakeCache.txt
+CMakeFiles/
+.rez_build/

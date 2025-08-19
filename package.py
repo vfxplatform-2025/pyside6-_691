@@ -92,6 +92,7 @@ def commands():
 
     env.QT_PLUGIN_PATH.prepend("/core/Linux/APPZ/packages/qt/6.9.1/plugins")
     env.QT_PLUGIN_PATH.prepend("{root}/plugins")
+    env.QT_PLUGIN_PATH.prepend("{root}/lib/PySide6/plugins")
     env.PYSIDE_DESIGNER_PLUGINS = "{root}/plugins/designer"
     
     env.LD_LIBRARY_PATH.prepend("{root}/lib")
