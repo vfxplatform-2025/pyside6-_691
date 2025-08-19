@@ -1,24 +1,10 @@
 #!/bin/bash
-# Multi-Python PySide6 Build Script
-# Builds PySide6 for Python versions 3.9, 3.10, 3.11, 3.12, 3.13
-# Based on successful build.sh approach with smart error handling
-# Usage: ./build_multi.sh
+# Multi-Python PySide6 6.9.1 Build Script for Rocky Linux 9
+# Based on proven build.sh patterns - Fallback option for rezbuild.py
+# Author: Claude Code Assistant
+# Date: $(date)
 
 set -e  # Exit on any error
-
-# Build configuration
-PYSIDE_VERSION="6.9.1"
-QT_VERSION="6.9.1"
-PYTHON_VERSIONS=("3.9.21" "3.10.6" "3.11.9" "3.12.10" "3.13.2")
-
-# Directory paths  
-SOURCE_DIR="/home/m83/chulho/pyside6/6.9.1/source/pyside-setup"
-BASE_BUILD_DIR="/home/m83/chulho/pyside6/6.9.1/build"
-BASE_INSTALL_DIR="/core/Linux/APPZ/packages/pyside6/6.9.1"
-
-# Qt and Shiboken paths
-QT_DIR="/core/Linux/APPZ/packages/qt/6.9.1"
-SHIBOKEN_DIR="/core/Linux/APPZ/packages/shiboken6/6.9.1"
 
 # Colors for output
 RED='\033[0;31m'
@@ -26,610 +12,717 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
 NC='\033[0m' # No Color
 
-# Logging functions
+# Build configuration
+PYSIDE_VERSION="6.9.1"
+QT_VERSION="6.9.1"
+
+# Python versions from readme.md (build.sh 검증된 순서로 정렬 - 3.13.2 먼저)
+PYTHON_VERSIONS=("3.13.2" "3.12.10" "3.11.9" "3.10.6" "3.9.21")
+
+# Directory paths
+BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE_DIR="$BASE_DIR/source/pyside-setup"
+BUILD_BASE_DIR="$BASE_DIR/build"
+INSTALL_DIR="/core/Linux/APPZ/packages/pyside6/6.9.1"
+
+# Qt and Shiboken paths
+QT_DIR="/core/Linux/APPZ/packages/qt/6.9.1"
+SHIBOKEN_DIR="/core/Linux/APPZ/packages/shiboken6/6.9.1"
+
+# Build statistics
+BUILD_START_TIME=$(date +%s)
+TOTAL_VERSIONS=${#PYTHON_VERSIONS[@]}
+CURRENT_VERSION=0
+SUCCESSFUL_BUILDS=()
+FAILED_BUILDS=()
+
+# Logging functions with progress tracking
 log() {
-    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] $1${NC}"
+    local elapsed=$(($(date +%s) - BUILD_START_TIME))
+    local elapsed_str=$(format_duration $elapsed)
+    if [ $TOTAL_VERSIONS -gt 0 ] && [ $CURRENT_VERSION -gt 0 ]; then
+        local progress=$((CURRENT_VERSION * 100 / TOTAL_VERSIONS))
+        echo -e "${BLUE}[$(date '+%H:%M:%S')]${NC} ${CYAN}[${elapsed_str}]${NC} ${GREEN}[${CURRENT_VERSION}/${TOTAL_VERSIONS} - ${progress}%]${NC} $1"
+    else
+        echo -e "${BLUE}[$(date '+%H:%M:%S')]${NC} ${CYAN}[${elapsed_str}]${NC} $1"
+    fi
 }
 
 error() {
-    echo -e "${RED}[ERROR] $1${NC}"
-    exit 1
+    log "${RED}[ERROR] $1${NC}"
 }
 
 warning() {
-    echo -e "${YELLOW}[WARNING] $1${NC}"
-}
-
-info() {
-    echo -e "${BLUE}[INFO] $1${NC}"
+    log "${YELLOW}[WARNING] $1${NC}"
 }
 
 stage() {
-    echo -e "${PURPLE}[STAGE] $1${NC}"
+    log "${PURPLE}🔧 $1${NC}"
 }
 
-# Smart error detection and fixing
-detect_running_builds() {
-    log "Checking for running PySide6 builds..."
+success() {
+    log "${GREEN}✅ $1${NC}"
+}
+
+# Time formatting function
+format_duration() {
+    local duration=$1
+    local hours=$((duration / 3600))
+    local minutes=$(((duration % 3600) / 60))
+    local seconds=$((duration % 60))
     
-    local running_builds=$(ps aux | grep -E "(rez-build|setup\.py|cmake|ninja)" | grep -v grep | grep -i pyside || true)
-    
-    if [ -n "$running_builds" ]; then
-        warning "Found running build processes:"
-        echo "$running_builds"
-        
-        # Kill running builds
-        pkill -f "rez-build.*pyside" || true
-        pkill -f "setup\.py.*pyside" || true
-        sleep 5
-        
-        log "Terminated running build processes"
+    if [ $hours -gt 0 ]; then
+        printf "%dh %dm %ds" $hours $minutes $seconds
+    elif [ $minutes -gt 0 ]; then
+        printf "%dm %ds" $minutes $seconds
     else
-        log "No conflicting build processes found"
+        printf "%ds" $seconds
     fi
 }
 
-# Enhanced environment setup
-setup_enhanced_environment() {
-    local python_version=$1
-    local python_path="/core/Linux/APPZ/packages/python/${python_version}/bin/python3"
+# Enhanced error detection and cleanup
+detect_and_terminate_builds() {
+    stage "Checking for running build processes..."
     
-    stage "Setting up environment for Python $python_version"
+    local terminated_count=0
+    local pids=$(ps aux | grep -E "(rez-build|setup\.py|cmake|ninja)" | grep -v grep | grep -i pyside | awk '{print $2}' || true)
     
-    # Check if rez Python exists
-    if [ ! -f "$python_path" ]; then
-        warning "Rez Python $python_version not found at $python_path"
-        python_path=$(which python3)
-        info "Using system Python: $python_path"
+    if [ -n "$pids" ]; then
+        warning "Found running build processes, terminating..."
+        for pid in $pids; do
+            if kill -TERM "$pid" 2>/dev/null; then
+                sleep 5
+                if kill -0 "$pid" 2>/dev/null; then
+                    kill -KILL "$pid" 2>/dev/null || true
+                fi
+                terminated_count=$((terminated_count + 1))
+            fi
+        done
+        success "Terminated $terminated_count running build process(es)"
+        sleep 3
     else
-        info "Using rez Python: $python_path"
+        success "No conflicting build processes found"
     fi
-    
-    # Qt environment
-    export QT_DIR="$QT_DIR"
-    export CMAKE_PREFIX_PATH="$QT_DIR:$SHIBOKEN_DIR:$CMAKE_PREFIX_PATH"
-    export PATH="$QT_DIR/bin:$(dirname $python_path):$PATH"
-    export LD_LIBRARY_PATH="$QT_DIR/lib:$SHIBOKEN_DIR/lib:$LD_LIBRARY_PATH"
-    export PKG_CONFIG_PATH="$QT_DIR/lib/pkgconfig:$SHIBOKEN_DIR/lib/pkgconfig:$PKG_CONFIG_PATH"
-    
-    # Python environment
-    export PYTHON="$python_path"
-    export PYTHON3="$python_path"
-    export PYTHON_EXECUTABLE="$python_path"
-    
-    # Enhanced header paths (from successful build.sh)
-    CLANG_HEADERS="/usr/lib/clang/19/include"
-    GCC_HEADERS="/usr/lib/gcc/x86_64-redhat-linux/11/include"
-    SYSTEM_HEADERS="/usr/include"
-    CPP_HEADERS="/usr/include/c++/11"
-    
-    export CLANG_BUILTIN_INCLUDE_DIR="$CLANG_HEADERS"
-    export C_INCLUDE_PATH="$GCC_HEADERS:$CLANG_HEADERS:$SYSTEM_HEADERS"
-    export CPLUS_INCLUDE_PATH="$CPP_HEADERS:$GCC_HEADERS:$CLANG_HEADERS:$SYSTEM_HEADERS"
-    export CLANG_INCLUDE_PATHS="$CLANG_HEADERS:$GCC_HEADERS:$CPP_HEADERS:$SYSTEM_HEADERS"
-    export SHIBOKEN_INCLUDE_PATHS="$CLANG_HEADERS:$GCC_HEADERS:$SYSTEM_HEADERS"
-    
-    # Build environment
-    export MAKEFLAGS="-j$(nproc)"
-    export NINJA_STATUS="[%f/%t] "
-    
-    log "Environment configured for Python $python_version"
 }
 
-# Create enhanced shiboken wrapper
-create_shiboken_wrapper() {
-    local build_dir=$1
-    
-    log "Creating enhanced Shiboken wrapper..."
-    
-    mkdir -p "$build_dir/shiboken_wrapper"
-    
-    cat > "$build_dir/shiboken_wrapper/shiboken6" << 'EOF'
-#!/bin/bash
-# Enhanced Shiboken6 wrapper with comprehensive header paths
-
-EXTRA_ARGS=""
-EXTRA_ARGS="$EXTRA_ARGS -I/usr/include"
-EXTRA_ARGS="$EXTRA_ARGS -I/usr/lib/clang/19/include"
-EXTRA_ARGS="$EXTRA_ARGS -I/usr/lib/gcc/x86_64-redhat-linux/11/include"
-EXTRA_ARGS="$EXTRA_ARGS -I/usr/lib/gcc/x86_64-redhat-linux/11/include-fixed"
-EXTRA_ARGS="$EXTRA_ARGS -I/usr/include/c++/11"
-EXTRA_ARGS="$EXTRA_ARGS -I/usr/include/c++/11/x86_64-redhat-linux"
-EXTRA_ARGS="$EXTRA_ARGS -I/usr/include/c++/11/backward"
-EXTRA_ARGS="$EXTRA_ARGS -resource-dir=/usr/lib/clang/19"
-
-export C_INCLUDE_PATH="/usr/lib/gcc/x86_64-redhat-linux/11/include:/usr/lib/clang/19/include:/usr/include"
-export CPLUS_INCLUDE_PATH="/usr/include/c++/11:/usr/include/c++/11/x86_64-redhat-linux:/usr/include/c++/11/backward:/usr/lib/gcc/x86_64-redhat-linux/11/include:/usr/lib/clang/19/include:/usr/include"
-export CLANG_BUILTIN_INCLUDE_DIR="/usr/lib/clang/19/include"
-
-# Find original shiboken6
-ORIGINAL_SHIBOKEN=$(which shiboken6 | grep -v shiboken_wrapper | head -1)
-if [ -z "$ORIGINAL_SHIBOKEN" ]; then
-    for path in /core/Linux/APPZ/packages/shiboken6/*/bin/shiboken6; do
-        if [ -x "$path" ]; then
-            ORIGINAL_SHIBOKEN="$path"
-            break
-        fi
-    done
-fi
-
-if [ -z "$ORIGINAL_SHIBOKEN" ]; then
-    echo "Error: Could not find original shiboken6"
-    exit 1
-fi
-
-exec "$ORIGINAL_SHIBOKEN" $EXTRA_ARGS "$@"
-EOF
-    
-    chmod +x "$build_dir/shiboken_wrapper/shiboken6"
-    export PATH="$build_dir/shiboken_wrapper:$PATH"
-    
-    log "Shiboken wrapper created and added to PATH"
-}
-
-# Smart build function with error recovery
-smart_build_pyside() {
-    local python_version=$1
-    local build_dir="$BASE_BUILD_DIR/python${python_version}"
-    local install_dir="$BASE_INSTALL_DIR/python${python_version}"
-    
-    stage "Building PySide6 for Python $python_version"
-    
-    # Setup environment
-    setup_enhanced_environment "$python_version"
-    
-    # Prepare directories
-    if [ -d "$build_dir" ]; then
-        log "Cleaning build directory: $build_dir"
-        rm -rf "$build_dir"
-    fi
-    mkdir -p "$build_dir"
-    
-    if [ -d "$install_dir" ]; then
-        log "Cleaning install directory: $install_dir"
-        rm -rf "$install_dir"
-    fi
-    mkdir -p "$install_dir"
-    
-    # Create shiboken wrapper
-    create_shiboken_wrapper "$build_dir"
-    
-    # Change to source directory
-    cd "$SOURCE_DIR"
-    
-    # Use existing Python packages (do not modify installed packages)
-    log "Using existing Python $python_version installation..."
-    
-    # Build with error recovery
-    local max_attempts=3
-    local attempt=1
-    
-    while [ $attempt -le $max_attempts ]; do
-        info "Build attempt $attempt/$max_attempts for Python $python_version"
-        
-        # Try incremental build approach (from successful build.sh)
-        if attempt_build_with_recovery "$python_version" "$build_dir" "$install_dir" "$attempt"; then
-            log "Build successful for Python $python_version"
-            return 0
-        else
-            warning "Build attempt $attempt failed for Python $python_version"
-            attempt=$((attempt + 1))
-            
-            if [ $attempt -le $max_attempts ]; then
-                log "Waiting 30 seconds before retry..."
-                sleep 30
-                
-                # Apply fixes based on attempt number
-                apply_build_fixes "$attempt" "$build_dir"
-            fi
-        fi
-    done
-    
-    error "All build attempts failed for Python $python_version"
-}
-
-# Attempt build with error recovery
-attempt_build_with_recovery() {
-    local python_version=$1
-    local build_dir=$2
-    local install_dir=$3
-    local attempt=$4
-    
-    # Set build-specific environment
-    export PYSIDE_BUILD_DIR="$build_dir"
-    export PYSIDE_INSTALL_DIR="$install_dir"
-    
-    # Use different strategies based on attempt
-    case $attempt in
-        1)
-            info "Attempt 1: CMake build (from successful build.sh)"
-            build_with_cmake "$python_version" "$install_dir" "$python_path"
-            ;;
-        2)
-            info "Attempt 2: CMake build with different Python path"
-            # Try with system Python if rez Python fails
-            local sys_python="/usr/bin/python3"
-            if [ "$python_path" != "$sys_python" ] && [ -x "$sys_python" ]; then
-                build_with_cmake "$python_version" "$install_dir" "$sys_python"
-            else
-                build_full_verbose "$install_dir"
-            fi
-            ;;
-        3)
-            info "Attempt 3: Fallback build with reduced modules"
-            build_fallback_reduced "$install_dir"
-            ;;
-    esac
-}
-
-# Incremental module build (successful approach from build.sh)
-build_with_cmake() {
-    local python_version=$1
-    local install_dir=$2
-    local python_path=$3
-    local build_dir="$BASE_BUILD_DIR/python${python_version}"
-    
-    log "Building PySide6 using CMake approach (from build.sh)..."
-    
-    # Clean paths to remove conflicting toolsets
-    export PATH=$(echo "$PATH" | tr ':' '\n' | grep -v '/opt/rh/gcc-toolset-14' | paste -sd ':' -)
-    unset LD_LIBRARY_PATH
-    
-    # Essential tools verification
-    for tool in ninja cmake qmake qtpaths6 pkg-config clang clang++; do
-        if ! command -v "$tool" &>/dev/null; then
-            error "Required tool not found: $tool"
-            return 1
-        fi
-    done
-    
-    # Clang resource directory
-    CLANG_RESOURCE_DIR=$(clang --print-resource-dir)
-    log "Using Clang resource directory: $CLANG_RESOURCE_DIR"
-    
-    # Python includes for this version
-    PY_INC=$($python_path -c "import sysconfig; print(sysconfig.get_paths()['include'])")
-    log "Python includes: $PY_INC"
-    
-    # Create header to neutralize __building_module macro
-    DISABLE_HDR="$build_dir/disable_building_module.h"
-    mkdir -p "$(dirname "$DISABLE_HDR")"
-    cat > "$DISABLE_HDR" << 'EOF'
-/* Auto-generated: Neutralize Clang __building_module(x) calls */
-#define __building_module(x) 0
-EOF
-    
-    # Common C/C++ flags from successful build.sh
-    COMMON_FLAGS=(
-        "-isystem" "$CLANG_RESOURCE_DIR/include"
-        "-include" "$DISABLE_HDR"
-        "-isystem" "$PY_INC"
-        "-isystem" "/usr/include"
+# Find specific rez Python version
+find_rez_python_version() {
+    local python_version="$1"
+    local python_exe_paths=(
+        "/core/Linux/APPZ/packages/python/${python_version}/bin/python3"
+        "/core/Linux/APPZ/packages/python/${python_version}/bin/python"
     )
     
-    export CFLAGS="${COMMON_FLAGS[*]}"
-    export CXXFLAGS="${COMMON_FLAGS[*]}"
+    for path in "${python_exe_paths[@]}"; do
+        if [ -x "$path" ]; then
+            echo "$path"
+            return 0
+        fi
+    done
     
-    # QtOpenGL aliases (as in build.sh)
-    QT_CMAKE_DIR="$QT_DIR/lib/cmake"
-    ln -sf "$QT_CMAKE_DIR/Qt6OpenGL" "$QT_CMAKE_DIR/QtOpenGL" 2>/dev/null || true
-    ln -sf "$QT_CMAKE_DIR/Qt6OpenGLWidgets" "$QT_CMAKE_DIR/QtOpenGLWidgets" 2>/dev/null || true
-    
-    # CMake build
-    cd "$SOURCE_DIR"
-    mkdir -p "$build_dir"
-    cd "$build_dir"
-    
-    cmake "$SOURCE_DIR" \
-        -G Ninja \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_PREFIX_PATH="$QT_DIR" \
-        -DCMAKE_C_COMPILER=clang \
-        -DCMAKE_CXX_COMPILER=clang++ \
-        -DCMAKE_AR=/usr/bin/ar \
-        -DCMAKE_NM=/usr/bin/nm \
-        -DCMAKE_C_FLAGS="$CFLAGS" \
-        -DCMAKE_CXX_FLAGS="$CXXFLAGS" \
-        -DPython3_EXECUTABLE="$python_path" \
-        -DCMAKE_INSTALL_PREFIX="$install_dir"
-    
-    if ! ninja; then
-        return 1
-    fi
-    
-    if ! ninja install; then
-        return 1
-    fi
-    
-    log "CMake build successful for Python $python_version"
-    return 0
+    warning "Rez Python $python_version not found, using system Python"
+    echo "$(which python3)"
 }
 
-# Full verbose build
-build_full_verbose() {
-    local install_dir=$1
+# Create enhanced shiboken wrapper (build.sh proven method)
+create_shiboken_wrapper() {
+    local build_dir="$1"
+    local wrapper_dir="$build_dir/shiboken_wrapper"
     
-    python3 setup.py build \
+    stage "Creating Shiboken wrapper (build.sh proven method)..."
+    
+    mkdir -p "$wrapper_dir"
+    
+    cat > "$wrapper_dir/shiboken6" << 'EOF'
+#!/bin/bash
+# Shiboken wrapper to add proper include paths (build.sh proven method)
+
+# Add system headers to arguments - build.sh에서 성공한 정확한 경로들
+EXTRA_ARGS=""
+EXTRA_ARGS="$EXTRA_ARGS -I/usr/lib/clang/19/include"
+EXTRA_ARGS="$EXTRA_ARGS -I/usr/lib/gcc/x86_64-redhat-linux/11/include"
+EXTRA_ARGS="$EXTRA_ARGS -I/usr/include"
+EXTRA_ARGS="$EXTRA_ARGS -I/usr/include/c++/11"
+EXTRA_ARGS="$EXTRA_ARGS -resource-dir=/usr/lib/clang/19"
+
+# Set environment - build.sh에서 검증된 환경변수
+export C_INCLUDE_PATH="/usr/lib/gcc/x86_64-redhat-linux/11/include:/usr/lib/clang/19/include:/usr/include"
+export CPLUS_INCLUDE_PATH="/usr/include/c++/11:/usr/lib/gcc/x86_64-redhat-linux/11/include:/usr/lib/clang/19/include:/usr/include"
+
+# Call original shiboken6 with additional arguments
+exec /core/Linux/APPZ/packages/shiboken6/6.9.1/bin/shiboken6 $EXTRA_ARGS "$@"
+EOF
+    
+    chmod +x "$wrapper_dir/shiboken6"
+    success "Created shiboken wrapper: $wrapper_dir/shiboken6"
+    
+    # Add wrapper to PATH
+    export PATH="$wrapper_dir:$PATH"
+}
+
+# Set environment variables (build.sh proven method)
+setup_build_environment() {
+    local python_exe="$1"
+    local python_version="$2"
+    
+    stage "Setting up build environment for Python $python_version (build.sh method)..."
+    
+    # build.sh에서 검증된 PATH 설정 (GCC toolset 경로 제거)
+    local old_path="$PATH"
+    local clean_path_parts=()
+    
+    IFS=':' read -ra PATH_PARTS <<< "$old_path"
+    for part in "${PATH_PARTS[@]}"; do
+        if [[ "$part" != *"gcc-toolset-14"* && "$part" != *"gcc-toolset-13"* ]]; then
+            clean_path_parts+=("$part")
+        fi
+    done
+    
+    # build.sh에서 검증된 헤더 경로
+    local clang_headers="/usr/lib/clang/19/include"
+    local gcc_headers="/usr/lib/gcc/x86_64-redhat-linux/11/include"
+    local system_headers="/usr/include"
+    local cpp_headers="/usr/include/c++/11"
+    
+    # Verify header directories exist
+    for header_dir in "$clang_headers" "$gcc_headers" "$system_headers" "$cpp_headers"; do
+        if [ -d "$header_dir" ]; then
+            log "✓ Found header directory: $header_dir"
+        else
+            warning "Header directory not found: $header_dir"
+        fi
+    done
+    
+    # build.sh에서 검증된 환경 변수 설정
+    export PATH="$QT_DIR/bin:$SHIBOKEN_DIR/bin:$(IFS=:; echo "${clean_path_parts[*]}")"
+    
+    # Qt environment (build.sh 방식)
+    export QT_DIR="$QT_DIR"
+    export CMAKE_PREFIX_PATH="$QT_DIR:$SHIBOKEN_DIR"
+    export LD_LIBRARY_PATH="$QT_DIR/lib:$SHIBOKEN_DIR/lib"
+    export PKG_CONFIG_PATH="$QT_DIR/lib/pkgconfig:$SHIBOKEN_DIR/lib/pkgconfig"
+    
+    # build.sh에서 검증된 헤더 환경변수
+    export CLANG_BUILTIN_INCLUDE_DIR="$clang_headers"
+    export C_INCLUDE_PATH="$gcc_headers:$clang_headers:$system_headers"
+    export CPLUS_INCLUDE_PATH="$cpp_headers:$gcc_headers:$clang_headers:$system_headers"
+    export CLANG_INCLUDE_PATHS="$clang_headers:$gcc_headers:$cpp_headers:$system_headers"
+    export SHIBOKEN_INCLUDE_PATHS="$clang_headers:$gcc_headers:$system_headers"
+    
+    # build.sh에서 검증된 추가 환경변수
+    export LLVM_INSTALL_DIR="/usr"
+    export CLANG_INCLUDE_PATH="$clang_headers"
+    export CLANG_RESOURCE_DIR="$clang_headers"
+    
+    # Python environment
+    export PYTHON="$python_exe"
+    export PYTHON3="$python_exe"
+    export PYTHON_EXECUTABLE="$python_exe"
+    export PYTHONPATH="$INSTALL_DIR/lib/python$python_version/site-packages"
+    
+    # build.sh에서 검증된 QMAKE 설정
+    export QMAKE="$QT_DIR/bin/qmake"
+    export QT_QMAKE_EXECUTABLE="$QT_DIR/bin/qmake"
+    
+    success "Build environment configured for Python $python_version"
+}
+
+# Build PySide6 for specific Python version (build.sh proven method)
+build_pyside6_for_version() {
+    local python_version="$1"
+    local python_exe="$2"
+    local build_dir="$3"
+    local install_dir="$4"
+    
+    stage "Building PySide6 for Python $python_version using build.sh proven method..."
+    
+    # Create version-specific build directory
+    mkdir -p "$build_dir"
+    
+    # Create Shiboken wrapper
+    create_shiboken_wrapper "$build_dir"
+    
+    # Setup environment
+    setup_build_environment "$python_exe" "${python_version%.*}"
+    
+    # Change to source directory for setup.py
+    cd "$SOURCE_DIR"
+    
+    stage "Starting PySide6 build with setup.py (build.sh proven method)..."
+    
+    # build.sh에서 성공한 setup.py 명령어
+    if "$python_exe" setup.py build \
         --qmake "$QT_DIR/bin/qmake" \
         --jobs $(nproc) \
-        --verbose-build \
-        --reuse-build && \
-    python3 setup.py install --prefix="$install_dir"
-}
-
-# Fallback reduced build
-build_fallback_reduced() {
-    local install_dir=$1
-    
-    python3 setup.py build \
-        --qmake "$QT_DIR/bin/qmake" \
-        --jobs 1 \
-        --module-subset=QtCore,QtGui,QtWidgets \
-        --skip-modules=QtWebEngine,QtWebEngineWidgets && \
-    python3 setup.py install --prefix="$install_dir"
-}
-
-# Apply build fixes based on attempt
-apply_build_fixes() {
-    local attempt=$1
-    local build_dir=$2
-    
-    info "Applying fixes for attempt $attempt"
-    
-    case $attempt in
-        2)
-            # Clear any cached build files
-            find "$build_dir" -name "*.pyc" -delete 2>/dev/null || true
-            find "$build_dir" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
-            ;;
-        3)
-            # More aggressive cleanup
-            rm -rf "$build_dir" 2>/dev/null || true
-            mkdir -p "$build_dir"
-            
-            # Reset environment
-            unset PYTHONPATH
-            export PYTHONPATH=""
-            ;;
-    esac
-}
-
-# Verify installation for a Python version
-verify_python_installation() {
-    local python_version=$1
-    local install_dir="$BASE_INSTALL_DIR/python${python_version}"
-    
-    stage "Verifying installation for Python $python_version"
-    
-    if [ ! -d "$install_dir" ]; then
-        error "Installation directory not found: $install_dir"
+        --verbose-build; then
+        
+        success "Build completed successfully for Python $python_version"
+        return 0
+    else
+        error "Build failed for Python $python_version"
         return 1
     fi
+}
+
+# Install PySide6 for specific Python version
+install_pyside6_for_version() {
+    local python_version="$1"
+    local python_exe="$2"
+    local install_dir="$3"
     
-    # Check for key files
-    local site_packages="$install_dir/lib/python${python_version}/site-packages"
+    stage "Installing PySide6 for Python $python_version..."
+    
+    cd "$SOURCE_DIR"
+    
+    # Create install directory
+    mkdir -p "$install_dir"
+    
+    # Install using setup.py (build.sh method)
+    if "$python_exe" setup.py install --prefix="$install_dir"; then
+        success "Installation completed for Python $python_version"
+        return 0
+    else
+        error "Installation failed for Python $python_version"
+        return 1
+    fi
+}
+
+# Verify installation
+verify_installation() {
+    local python_version="$1"
+    local python_exe="$2"
+    local install_dir="$3"
+    
+    stage "Verifying installation for Python $python_version..."
+    
+    local python_major_minor="${python_version%.*}"
+    local site_packages="$install_dir/lib/python$python_major_minor/site-packages"
+    
+    # Check if PySide6 package exists
     if [ ! -d "$site_packages/PySide6" ]; then
         error "PySide6 package not found in $site_packages"
         return 1
     fi
     
-    log "Installation verified for Python $python_version"
-    return 0
-}
-
-# Create unified installation
-create_unified_installation() {
-    stage "Creating unified multi-Python installation"
+    # Try to import PySide6
+    local pythonpath_backup="$PYTHONPATH"
+    export PYTHONPATH="$site_packages:$PYTHONPATH"
     
-    # Create main installation directory structure
-    mkdir -p "$BASE_INSTALL_DIR"/{bin,lib,include,share}
-    
-    # Copy tools and binaries from the primary Python version (3.13)
-    local primary_version="3.13"
-    local primary_install="$BASE_INSTALL_DIR/python${primary_version}"
-    
-    if [ -d "$primary_install/bin" ]; then
-        log "Copying tools from Python $primary_version installation"
-        cp -r "$primary_install/bin/"* "$BASE_INSTALL_DIR/bin/" 2>/dev/null || true
-    fi
-    
-    if [ -d "$primary_install/include" ]; then
-        cp -r "$primary_install/include/"* "$BASE_INSTALL_DIR/include/" 2>/dev/null || true
-    fi
-    
-    if [ -d "$primary_install/share" ]; then
-        cp -r "$primary_install/share/"* "$BASE_INSTALL_DIR/share/" 2>/dev/null || true
-    fi
-    
-    # Create unified lib structure with all Python versions
-    for version in "${PYTHON_VERSIONS[@]}"; do
-        local version_install="$BASE_INSTALL_DIR/python${version}"
-        if [ -d "$version_install/lib" ]; then
-            log "Integrating Python $version libraries"
-            cp -r "$version_install/lib/"* "$BASE_INSTALL_DIR/lib/" 2>/dev/null || true
-        fi
-    done
-    
-    log "Unified installation created at $BASE_INSTALL_DIR"
-}
-
-# Create final package.py
-create_package_py() {
-    stage "Creating package.py for multi-Python support"
-    
-    cat > "$BASE_INSTALL_DIR/package.py" << 'EOF'
-# -*- coding: utf-8 -*-
-import os
-
-name        = "pyside6"
-version     = "6.9.1"
-authors     = ["The Qt Project"]
-description = "Python bindings for Qt6 (PySide6) : Multi-Python version support"
-
-# 런타임에는 Python과 shiboken6만 필요 (멀티 Python 버전 지원)
-requires = [
-    "shiboken6-6.9.1",
-    "qt-6.9.1", 
-    "python",  # 모든 Python 버전 지원 (3.9~3.13)
-    "numpy-1.26.4"
-]
-
-# 빌드 시에도 같은 의존성 + pip
-build_requires = [
-    "gcc-11.5.0",
-    "system_clang-19.1.7",
-    "cmake-3.26.5",
-    "ninja-1.11.1",
-    "qt-6.9.1",
-    "python",
-    "shiboken6-6.9.1",
-    "numpy-1.26.4",
-    "minizip_ng-4.0.10"
-]
-
-tools = [
-    # 기본 도구들
-    "pyside6-uic",                    # UI 파일 → Python 변환
-    "pyside6-rcc",                    # 리소스 컴파일러
-    "pyside6-designer",               # Qt Designer (GUI 디자인)
-    "pyside6-assistant",              # Qt Assistant (도움말)
-    
-    # 번역/국제화 도구들
-    "pyside6-linguist",               # 번역 에디터
-    "pyside6-lupdate",                # 번역 파일 업데이트
-    "pyside6-lrelease",               # 번역 파일 컴파일
-    
-    # QML 관련 도구들
-    "pyside6-qml",                    # QML 런타임
-    "pyside6-qmlcachegen",            # QML 캐시 생성
-    "pyside6-qmlformat",              # QML 코드 포맷팅
-    "pyside6-qmlimportscanner",       # QML 임포트 스캔
-    "pyside6-qmllint",                # QML 문법 검사
-    "pyside6-qmlls",                  # QML 언어 서버
-    "pyside6-qmltyperegistrar",       # QML 타입 등록
-    "pyside6-qsb",                    # Qt Shader Baker
-    
-    # 3D/렌더링 도구들
-    "pyside6-balsam",                 # 3D 에셋 임포터
-    "pyside6-balsamui",               # Balsam UI
-    "pyside6-svgtoqml",               # SVG → QML 변환
-    
-    # 개발/배포 도구들
-    "pyside6-deploy",                 # 앱 배포 도구
-    "pyside6-android-deploy",         # 안드로이드 배포
-    "pyside6-project",                # 프로젝트 관리
-    "pyside6-genpyi",                 # Python stub 파일 생성
-    "pyside6-metaobjectdump",         # 메타오브젝트 덤프
-    "pyside6-qtpy2cpp",               # Python → C++ 변환
-    
-    # Shiboken 도구들
-    "shiboken6",                      # 바인딩 생성기
-    "shiboken6-genpyi"                # Shiboken용 stub 생성
-]
-
-def commands():
-    import os
-    import subprocess
-    
-    # 현재 활성화된 Python 버전 감지
-    try:
-        result = subprocess.run(['python', '-c', 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'], 
-                               capture_output=True, text=True)
-        python_version = result.stdout.strip()
-    except:
-        python_version = "3.13"  # 기본값
-    
-    # Python 버전별 site-packages 경로 설정
-    python_site_packages = "{root}/lib/python" + python_version + "/site-packages"
-    
-    env.PATH.prepend("{root}/bin")
-    env.PYTHONPATH.prepend(python_site_packages)
-    env.PYTHONPATH.prepend("{root}/tools")
-    env.QML2_IMPORT_PATH.prepend("{root}/qml")
-    env.QML_IMPORT_PATH.prepend("{root}/qml")
-
-    env.QT_PLUGIN_PATH.prepend("{root}/lib/PySide6/plugins")
-    env.PYSIDE_DESIGNER_PLUGINS = "{root}/plugins/designer"
-    
-    env.LD_LIBRARY_PATH.prepend("{root}/lib")
-    env.CMAKE_PREFIX_PATH.prepend("{root}")
-
-uuid = "pyside6-6.9.1"
-EOF
-    
-    log "Multi-Python package.py created"
-}
-
-# Main execution
-main() {
-    log "Starting Multi-Python PySide6 Build Process"
-    log "============================================"
-    log "Target Python versions: ${PYTHON_VERSIONS[*]}"
-    log "Source: $SOURCE_DIR"
-    log "Install: $BASE_INSTALL_DIR"
-    
-    # Preliminary checks
-    detect_running_builds
-    
-    if [ ! -d "$SOURCE_DIR" ]; then
-        error "Source directory not found: $SOURCE_DIR"
-    fi
-    
-    if [ ! -d "$QT_DIR" ]; then
-        error "Qt directory not found: $QT_DIR"
-    fi
-    
-    if [ ! -d "$SHIBOKEN_DIR" ]; then
-        error "Shiboken directory not found: $SHIBOKEN_DIR"
-    fi
-    
-    # Build for each Python version
-    local successful_builds=0
-    local failed_builds=0
-    
-    for version in "${PYTHON_VERSIONS[@]}"; do
-        log "----------------------------------------"
-        if smart_build_pyside "$version"; then
-            if verify_python_installation "$version"; then
-                successful_builds=$((successful_builds + 1))
-                log "Python $version: ✅ SUCCESS"
-            else
-                failed_builds=$((failed_builds + 1))
-                warning "Python $version: ⚠️  BUILD OK, VERIFY FAILED"
-            fi
-        else
-            failed_builds=$((failed_builds + 1))
-            error "Python $version: ❌ FAILED"
-        fi
-    done
-    
-    # Create unified installation if at least one build succeeded
-    if [ $successful_builds -gt 0 ]; then
-        create_unified_installation
-        create_package_py
-        
-        log "=========================================="
-        log "Multi-Python PySide6 Build Summary"
-        log "=========================================="
-        log "Successful builds: $successful_builds/${#PYTHON_VERSIONS[@]}"
-        log "Failed builds: $failed_builds/${#PYTHON_VERSIONS[@]}"
-        log "Installation: $BASE_INSTALL_DIR"
-        log "=========================================="
-        
-        if [ $failed_builds -eq 0 ]; then
-            log "🎉 All Python versions built successfully!"
-            return 0
-        else
-            warning "⚠️  Some Python versions failed, but installation is available"
-            return 1
-        fi
+    if "$python_exe" -c "import PySide6; print(f'PySide6 {PySide6.__version__} imported successfully')" 2>/dev/null; then
+        success "PySide6 import test passed for Python $python_version"
+        export PYTHONPATH="$pythonpath_backup"
+        return 0
     else
-        error "❌ All Python version builds failed"
+        error "PySide6 import test failed for Python $python_version"
+        export PYTHONPATH="$pythonpath_backup"
         return 1
     fi
 }
 
-# Execute main function
+# Create tool wrappers (_pyside6 style)
+create_tool_wrappers() {
+    stage "Creating PySide6 tool wrappers (_pyside6 style)..."
+    
+    local python3_13_site_packages="$INSTALL_DIR/lib/python3.13/site-packages"
+    local bin_dir="$INSTALL_DIR/bin"
+    
+    # Create bin directory
+    mkdir -p "$bin_dir"
+    
+    # Qt libexec tools (both pyside6- and basic versions)
+    local qt_tools=(
+        "pyside6-uic:$python3_13_site_packages/PySide6/Qt/libexec/uic"
+        "uic:$python3_13_site_packages/PySide6/Qt/libexec/uic"
+        "pyside6-rcc:$python3_13_site_packages/PySide6/Qt/libexec/rcc"
+        "rcc:$python3_13_site_packages/PySide6/Qt/libexec/rcc"
+        "pyside6-qmlcachegen:$python3_13_site_packages/PySide6/Qt/libexec/qmlcachegen"
+        "qmlcachegen:$python3_13_site_packages/PySide6/Qt/libexec/qmlcachegen"
+        "pyside6-qmlimportscanner:$python3_13_site_packages/PySide6/Qt/libexec/qmlimportscanner"
+        "qmlimportscanner:$python3_13_site_packages/PySide6/Qt/libexec/qmlimportscanner"
+        "pyside6-qmltyperegistrar:$python3_13_site_packages/PySide6/Qt/libexec/qmltyperegistrar"
+        "qmltyperegistrar:$python3_13_site_packages/PySide6/Qt/libexec/qmltyperegistrar"
+    )
+    
+    # PySide6 binary tools (both versions)
+    local pyside_tools=(
+        "pyside6-assistant:$python3_13_site_packages/PySide6/assistant"
+        "assistant:$python3_13_site_packages/PySide6/assistant"
+        "pyside6-designer:$python3_13_site_packages/PySide6/designer"
+        "designer:$python3_13_site_packages/PySide6/designer"
+        "pyside6-linguist:$python3_13_site_packages/PySide6/linguist"
+        "linguist:$python3_13_site_packages/PySide6/linguist"
+        "pyside6-lrelease:$python3_13_site_packages/PySide6/lrelease"
+        "lrelease:$python3_13_site_packages/PySide6/lrelease"
+        "pyside6-lupdate:$python3_13_site_packages/PySide6/lupdate"
+        "lupdate:$python3_13_site_packages/PySide6/lupdate"
+        "pyside6-balsam:$python3_13_site_packages/PySide6/balsam"
+        "balsam:$python3_13_site_packages/PySide6/balsam"
+        "pyside6-balsamui:$python3_13_site_packages/PySide6/balsamui"
+        "balsamui:$python3_13_site_packages/PySide6/balsamui"
+        "pyside6-qmlformat:$python3_13_site_packages/PySide6/qmlformat"
+        "qmlformat:$python3_13_site_packages/PySide6/qmlformat"
+        "pyside6-qmllint:$python3_13_site_packages/PySide6/qmllint"
+        "qmllint:$python3_13_site_packages/PySide6/qmllint"
+        "pyside6-qmlls:$python3_13_site_packages/PySide6/qmlls"
+        "qmlls:$python3_13_site_packages/PySide6/qmlls"
+        "pyside6-qsb:$python3_13_site_packages/PySide6/qsb"
+        "qsb:$python3_13_site_packages/PySide6/qsb"
+        "pyside6-svgtoqml:$python3_13_site_packages/PySide6/svgtoqml"
+        "svgtoqml:$python3_13_site_packages/PySide6/svgtoqml"
+    )
+    
+    # Python script tools
+    local python_tools=(
+        "pyside6-android-deploy:$python3_13_site_packages/PySide6/scripts/android_deploy.py"
+        "pyside6-deploy:$python3_13_site_packages/PySide6/scripts/deploy.py"
+        "pyside6-metaobjectdump:$python3_13_site_packages/PySide6/scripts/metaobjectdump.py"
+        "pyside6-project:$python3_13_site_packages/PySide6/scripts/project.py"
+        "pyside6-qml:$python3_13_site_packages/PySide6/scripts/qml.py"
+        "pyside6-qtpy2cpp:$python3_13_site_packages/PySide6/scripts/qtpy2cpp.py"
+        "pyside6-genpyi:$python3_13_site_packages/PySide6/support/generate_pyi.py"
+    )
+    
+    # Shiboken6 tools
+    local shiboken_tools=(
+        "shiboken6:$python3_13_site_packages/shiboken6_generator/shiboken6"
+        "shiboken6-genpyi:$python3_13_site_packages/shiboken6_generator/shiboken6"
+    )
+    
+    # Create binary tool wrappers
+    for tool_entry in "${qt_tools[@]}" "${pyside_tools[@]}"; do
+        local tool_name="${tool_entry%%:*}"
+        local target_path="${tool_entry##*:}"
+        
+        if [ -f "$target_path" ]; then
+            cat > "$bin_dir/$tool_name" << EOF
+#!/bin/bash
+# PySide6 $tool_name wrapper  
+exec "$target_path" "\$@"
+EOF
+            chmod +x "$bin_dir/$tool_name"
+        fi
+    done
+    
+    # Create Python script wrappers
+    for tool_entry in "${python_tools[@]}"; do
+        local tool_name="${tool_entry%%:*}"
+        local target_path="${tool_entry##*:}"
+        
+        if [ -f "$target_path" ]; then
+            cat > "$bin_dir/$tool_name" << EOF
+#!/bin/bash
+# PySide6 $tool_name wrapper
+exec python3 "$target_path" "\$@"
+EOF
+            chmod +x "$bin_dir/$tool_name"
+        fi
+    done
+    
+    # Create Shiboken6 wrappers
+    for tool_entry in "${shiboken_tools[@]}"; do
+        local tool_name="${tool_entry%%:*}"
+        local target_path="${tool_entry##*:}"
+        
+        if [ -f "$target_path" ]; then
+            cat > "$bin_dir/$tool_name" << EOF
+#!/bin/bash
+# PySide6 $tool_name wrapper  
+exec "$target_path" "\$@"
+EOF
+            chmod +x "$bin_dir/$tool_name"
+        fi
+    done
+    
+    # Copy support files
+    if [ -d "$python3_13_site_packages/PySide6/scripts" ]; then
+        for script in android_deploy.py deploy.py metaobjectdump.py project.py qml.py qtpy2cpp.py pyside_tool.py; do
+            if [ -f "$python3_13_site_packages/PySide6/scripts/$script" ]; then
+                cp "$python3_13_site_packages/PySide6/scripts/$script" "$bin_dir/"
+                chmod +x "$bin_dir/$script"
+            fi
+        done
+        
+        # Copy requirements file
+        if [ -f "$python3_13_site_packages/PySide6/scripts/requirements-android.txt" ]; then
+            cp "$python3_13_site_packages/PySide6/scripts/requirements-android.txt" "$bin_dir/"
+        fi
+    fi
+    
+    # Count created tools
+    local tool_count=$(find "$bin_dir" -maxdepth 1 -type f | wc -l)
+    success "Created $tool_count tool wrappers in $bin_dir"
+}
+
+# Setup directory structure (_pyside6 style)
+setup_directory_structure() {
+    stage "Setting up complete directory structure (_pyside6 style)..."
+    
+    local python3_13_site_packages="$INSTALL_DIR/lib/python3.13/site-packages"
+    
+    # Create include structure
+    mkdir -p "$INSTALL_DIR/include"
+    if [ -d "$python3_13_site_packages/PySide6/include" ]; then
+        cp -r "$python3_13_site_packages/PySide6/include" "$INSTALL_DIR/include/PySide6"
+    fi
+    if [ -d "$python3_13_site_packages/shiboken6_generator/include" ]; then
+        cp -r "$python3_13_site_packages/shiboken6_generator/include" "$INSTALL_DIR/include/shiboken6"
+    fi
+    
+    # Setup lib structure with proper symlinks
+    mkdir -p "$INSTALL_DIR/lib"/{cmake,pkgconfig}
+    
+    # Copy libraries and create symlinks
+    local lib_dir="$INSTALL_DIR/lib"
+    for lib_path in "$python3_13_site_packages/PySide6"/lib*.so.* "$python3_13_site_packages/shiboken6"/lib*.so.*; do
+        if [ -f "$lib_path" ]; then
+            local lib_name=$(basename "$lib_path")
+            cp "$lib_path" "$lib_dir/"
+            
+            # Create versioned symlinks
+            local base_name="${lib_name%.so.*}.so"
+            local version_name="${lib_name%.1}"
+            
+            cd "$lib_dir"
+            ln -sf "$lib_name" "$version_name"
+            ln -sf "$version_name" "$base_name"
+            cd - > /dev/null
+        fi
+    done
+    
+    # Create pkgconfig files
+    cat > "$INSTALL_DIR/lib/pkgconfig/pyside6.pc" << EOF
+prefix=$INSTALL_DIR
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: PySide6
+Description: Python bindings for Qt6
+Version: 6.9.1
+Requires: Qt6Core Qt6Gui Qt6Widgets
+Libs: -L\${libdir} -lpyside6
+Cflags: -I\${includedir}
+EOF
+    
+    cat > "$INSTALL_DIR/lib/pkgconfig/shiboken6.pc" << EOF
+prefix=$INSTALL_DIR
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: Shiboken6
+Description: CPython bindings generator for Qt6
+Version: 6.9.1
+Libs: -L\${libdir} -lshiboken6
+Cflags: -I\${includedir}/shiboken6
+EOF
+    
+    # Setup plugins structure
+    mkdir -p "$INSTALL_DIR/plugins/designer"
+    
+    # Setup share structure
+    mkdir -p "$INSTALL_DIR/share/PySide6"
+    for subdir in doc glue typesystems; do
+        if [ -d "$python3_13_site_packages/PySide6/$subdir" ]; then
+            cp -r "$python3_13_site_packages/PySide6/$subdir" "$INSTALL_DIR/share/PySide6/"
+        fi
+    done
+    
+    success "Complete directory structure created at $INSTALL_DIR"
+}
+
+# Copy package.py to installation directory
+copy_package_file() {
+    stage "Copying Rez package definition..."
+    
+    local source_package="$BASE_DIR/package.py"
+    local dest_package="$INSTALL_DIR/package.py"
+    
+    if [ -f "$source_package" ]; then
+        cp "$source_package" "$dest_package"
+        success "Copied package.py to $dest_package"
+    else
+        error "Source package.py not found: $source_package"
+        return 1
+    fi
+}
+
+# Create unified installation
+create_unified_installation() {
+    stage "Creating unified multi-Python installation..."
+    
+    # Create main installation directory structure
+    mkdir -p "$INSTALL_DIR"/{bin,lib,include,share,plugins}
+    
+    # Setup complete directory structure
+    setup_directory_structure
+    
+    # Create tool wrappers
+    create_tool_wrappers
+    
+    # Copy Rez package definition
+    copy_package_file
+    
+    success "Unified installation completed at $INSTALL_DIR"
+}
+
+# Build summary and statistics
+show_build_summary() {
+    local build_duration=$(($(date +%s) - BUILD_START_TIME))
+    local duration_str=$(format_duration $build_duration)
+    
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════"
+    echo -e "${WHITE}📊 Multi-Python PySide6 Build Summary${NC}"
+    echo "═══════════════════════════════════════════════════════════════"
+    echo -e "Duration: ${CYAN}$duration_str${NC}"
+    echo -e "Total Python versions: ${BLUE}${#PYTHON_VERSIONS[@]}${NC}"
+    echo -e "Successful builds: ${GREEN}${#SUCCESSFUL_BUILDS[@]}${NC}"
+    echo -e "Failed builds: ${RED}${#FAILED_BUILDS[@]}${NC}"
+    
+    if [ ${#SUCCESSFUL_BUILDS[@]} -gt 0 ]; then
+        echo -e "Build efficiency: ${CYAN}$((${#SUCCESSFUL_BUILDS[@]}*100/${#PYTHON_VERSIONS[@]}))%${NC}"
+        echo -e "Average time per version: ${CYAN}$(format_duration $((build_duration/${#PYTHON_VERSIONS[@]})))${NC}"
+    fi
+    
+    echo -e "Installation: ${BLUE}$INSTALL_DIR${NC}"
+    
+    if [ ${#SUCCESSFUL_BUILDS[@]} -eq ${#PYTHON_VERSIONS[@]} ]; then
+        echo -e "Status: ${GREEN}✅ ALL BUILDS SUCCESS${NC}"
+    elif [ ${#SUCCESSFUL_BUILDS[@]} -gt 0 ]; then
+        echo -e "Status: ${YELLOW}⚠️  PARTIAL SUCCESS${NC}"
+    else
+        echo -e "Status: ${RED}❌ ALL BUILDS FAILED${NC}"
+    fi
+    echo "═══════════════════════════════════════════════════════════════"
+    
+    if [ ${#SUCCESSFUL_BUILDS[@]} -gt 0 ]; then
+        echo -e "${GREEN}✅ Successful builds:${NC}"
+        for version in "${SUCCESSFUL_BUILDS[@]}"; do
+            echo "   - Python $version"
+        done
+    fi
+    
+    if [ ${#FAILED_BUILDS[@]} -gt 0 ]; then
+        echo -e "${RED}❌ Failed builds:${NC}"
+        for version in "${FAILED_BUILDS[@]}"; do
+            echo "   - Python $version"
+        done
+    fi
+}
+
+# Main execution function
+main() {
+    log "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+    log "${GREEN}🚀 Multi-Python PySide6 Build Script Starting (build.sh method)${NC}"
+    log "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+    log "📦 PySide6 version: $PYSIDE_VERSION"
+    log "🐍 Target Python versions: ${PYTHON_VERSIONS[*]}"
+    log "📁 Source directory: $SOURCE_DIR"
+    log "📁 Install directory: $INSTALL_DIR"
+    log "🎯 Total versions to build: ${#PYTHON_VERSIONS[@]}"
+    
+    # Preliminary checks
+    detect_and_terminate_builds
+    
+    # Verify source directory
+    if [ ! -d "$SOURCE_DIR" ]; then
+        error "Source directory not found: $SOURCE_DIR"
+        exit 1
+    fi
+    
+    if [ ! -f "$SOURCE_DIR/setup.py" ] && [ ! -f "$SOURCE_DIR/CMakeLists.txt" ]; then
+        error "PySide setup files not found in $SOURCE_DIR"
+        exit 1
+    fi
+    
+    # Verify dependencies
+    if [ ! -d "$QT_DIR" ]; then
+        error "Qt directory not found: $QT_DIR"
+        exit 1
+    fi
+    
+    if [ ! -d "$SHIBOKEN_DIR" ]; then
+        error "Shiboken directory not found: $SHIBOKEN_DIR"
+        exit 1
+    fi
+    
+    success "All prerequisite checks passed"
+    
+    # Build for each Python version
+    for python_version in "${PYTHON_VERSIONS[@]}"; do
+        CURRENT_VERSION=$((CURRENT_VERSION + 1))
+        log ""
+        log "────────────────────────────────────────────────────────────────"
+        stage "Building PySide6 for Python $python_version [$CURRENT_VERSION/${#PYTHON_VERSIONS[@]}]"
+        log "────────────────────────────────────────────────────────────────"
+        
+        # Find Python executable
+        python_exe=$(find_rez_python_version "$python_version")
+        if [ -z "$python_exe" ]; then
+            error "Python executable not found for version $python_version"
+            FAILED_BUILDS+=("$python_version")
+            continue
+        fi
+        
+        log "🐍 Using Python executable: $python_exe"
+        
+        # Version-specific paths
+        local version_build_dir="$BUILD_BASE_DIR/python$python_version"
+        local python_major_minor="${python_version%.*}"
+        
+        # Clean build directory
+        if [ -d "$version_build_dir" ]; then
+            log "🧹 Cleaning build directory: $version_build_dir"
+            rm -rf "$version_build_dir"
+        fi
+        
+        # Build PySide6
+        if build_pyside6_for_version "$python_version" "$python_exe" "$version_build_dir" "$INSTALL_DIR"; then
+            # Install PySide6
+            if install_pyside6_for_version "$python_version" "$python_exe" "$INSTALL_DIR"; then
+                # Verify installation
+                if verify_installation "$python_version" "$python_exe" "$INSTALL_DIR"; then
+                    SUCCESSFUL_BUILDS+=("$python_version")
+                    success "✅ Complete success for Python $python_version"
+                else
+                    FAILED_BUILDS+=("$python_version")
+                    error "❌ Verification failed for Python $python_version"
+                fi
+            else
+                FAILED_BUILDS+=("$python_version")
+                error "❌ Installation failed for Python $python_version"
+            fi
+        else
+            FAILED_BUILDS+=("$python_version")
+            error "❌ Build failed for Python $python_version"
+        fi
+    done
+    
+    # Create unified installation if at least one build succeeded
+    if [ ${#SUCCESSFUL_BUILDS[@]} -gt 0 ]; then
+        create_unified_installation
+    fi
+    
+    # Show final summary
+    show_build_summary
+    
+    # Return appropriate exit code
+    if [ ${#SUCCESSFUL_BUILDS[@]} -eq ${#PYTHON_VERSIONS[@]} ]; then
+        log "🎉 All Python versions built successfully!"
+        exit 0
+    elif [ ${#SUCCESSFUL_BUILDS[@]} -gt 0 ]; then
+        log "⚠️  Some Python versions built successfully"
+        exit 1
+    else
+        log "💥 All Python version builds failed!"
+        exit 1
+    fi
+}
+
+# Run main function
 main "$@"

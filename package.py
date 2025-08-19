@@ -73,33 +73,56 @@ def commands():
     import os
     import subprocess
     
-    # 현재 활성화된 Python 버전 감지
+    # 현재 활성화된 Python 버전 감지 (개선된 버전)
+    python_version = "3.13"  # 기본값
+    
+    # 여러 방법으로 Python 버전 감지 시도
     try:
+        # 1. 현재 실행 중인 Python 버전 확인
         result = subprocess.run(['python', '-c', 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'], 
-                               capture_output=True, text=True)
-        python_version = result.stdout.strip()
+                               capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            detected_version = result.stdout.strip()
+            # 지원되는 Python 버전인지 확인 (3.9, 3.10, 3.11, 3.12, 3.13)
+            if detected_version in ["3.9", "3.10", "3.11", "3.12", "3.13"]:
+                python_version = detected_version
     except:
-        python_version = "3.13"  # 기본값
+        # 2. 환경변수에서 Python 버전 확인
+        try:
+            if os.environ.get('REZ_PYTHON_VERSION'):
+                rez_python = os.environ.get('REZ_PYTHON_VERSION')
+                if rez_python and rez_python in ["3.9", "3.10", "3.11", "3.12", "3.13"]:
+                    python_version = rez_python
+        except:
+            pass
     
     # Python 버전별 site-packages 경로 설정
     python_site_packages = "{root}/lib/python" + python_version + "/site-packages"
     
+    # PATH에 bin 디렉토리 추가 (모든 도구 래퍼들이 있는 곳)
     env.PATH.prepend("{root}/bin")
+    
+    # Python 환경 설정
     env.PYTHONPATH.prepend(python_site_packages)
-    env.PYTHONPATH.prepend("{root}/tools")
+    
+    # QML 관련 경로 설정
     env.QML2_IMPORT_PATH.prepend("{root}/qml")
-    env.QML_IMPORT_PATH.prepend("{root}/qml") 
-
+    env.QML_IMPORT_PATH.prepend("{root}/qml")
+    
+    # Qt 플러그인 경로 설정
     env.QT_PLUGIN_PATH.prepend("/core/Linux/APPZ/packages/qt/6.9.1/plugins")
     env.QT_PLUGIN_PATH.prepend("{root}/plugins")
     env.QT_PLUGIN_PATH.prepend("{root}/lib/PySide6/plugins")
     env.PYSIDE_DESIGNER_PLUGINS = "{root}/plugins/designer"
     
+    # 라이브러리 및 개발 환경 설정
     env.LD_LIBRARY_PATH.prepend("{root}/lib")
     env.CMAKE_PREFIX_PATH.prepend("{root}")
+    env.PKG_CONFIG_PATH.prepend("{root}/lib/pkgconfig")
     
-    # 디버그 정보 출력 (선택적)
-    # env.PYSIDE6_PYTHON_VERSION = python_version
+    # PySide6 특화 환경 변수
+    env.PYSIDE6_PYTHON_VERSION = python_version
+    env.PYSIDE6_ROOT = "{root}"
     
 uuid = "pyside6-6.9.1"    
     

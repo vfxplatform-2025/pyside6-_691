@@ -88,15 +88,17 @@ def analyze_and_fix_errors():
         return False
 
 def fix_stdbool_headers():
-    """Fix stdbool.h header path issues"""
-    smart_log("🔧 Applying stdbool.h header fix...")
+    """Fix stdbool.h header path issues - build.sh proven method"""
+    smart_log("🔧 Applying stdbool.h header fix (build.sh method)...")
     
     try:
-        # Update environment variables
+        # build.sh에서 성공한 정확한 헤더 경로들
         header_paths = [
-            "/usr/lib/clang/19/include",
-            "/usr/lib/gcc/x86_64-redhat-linux/11/include",
-            "/usr/include"
+            "/usr/lib/clang/19/include",           # Clang headers
+            "/usr/lib/gcc/x86_64-redhat-linux/11/include",  # GCC headers
+            "/usr/include",                        # System headers
+            "/usr/include/c++/11",                 # C++ headers
+            "/usr/include/linux"                   # Linux headers
         ]
         
         current_c_include = os.environ.get("C_INCLUDE_PATH", "")
@@ -116,8 +118,8 @@ def fix_stdbool_headers():
         return 0
 
 def fix_shiboken_wrapper():
-    """Update or create enhanced Shiboken wrapper"""
-    smart_log("🔧 Updating Shiboken wrapper...")
+    """Create build.sh proven Shiboken wrapper"""
+    smart_log("🔧 Creating Shiboken wrapper (build.sh proven method)...")
     
     try:
         build_dir = os.environ.get("REZ_BUILD_PATH", "build")
@@ -126,40 +128,24 @@ def fix_shiboken_wrapper():
         
         wrapper_script = os.path.join(wrapper_dir, "shiboken6")
         
+        # build.sh에서 검증된 정확한 wrapper 내용
         wrapper_content = '''#!/bin/bash
-# Enhanced Shiboken6 wrapper with comprehensive header paths
+# Shiboken wrapper to add proper include paths (build.sh proven method)
 
+# Add system headers to arguments - build.sh에서 성공한 정확한 경로들
 EXTRA_ARGS=""
-EXTRA_ARGS="$EXTRA_ARGS -I/usr/include"
-EXTRA_ARGS="$EXTRA_ARGS -I/usr/lib/clang/19/include" 
+EXTRA_ARGS="$EXTRA_ARGS -I/usr/lib/clang/19/include"
 EXTRA_ARGS="$EXTRA_ARGS -I/usr/lib/gcc/x86_64-redhat-linux/11/include"
-EXTRA_ARGS="$EXTRA_ARGS -I/usr/lib/gcc/x86_64-redhat-linux/11/include-fixed"
+EXTRA_ARGS="$EXTRA_ARGS -I/usr/include"
 EXTRA_ARGS="$EXTRA_ARGS -I/usr/include/c++/11"
-EXTRA_ARGS="$EXTRA_ARGS -I/usr/include/c++/11/x86_64-redhat-linux"
-EXTRA_ARGS="$EXTRA_ARGS -I/usr/include/c++/11/backward"
 EXTRA_ARGS="$EXTRA_ARGS -resource-dir=/usr/lib/clang/19"
 
+# Set environment - build.sh에서 검증된 환경변수
 export C_INCLUDE_PATH="/usr/lib/gcc/x86_64-redhat-linux/11/include:/usr/lib/clang/19/include:/usr/include"
-export CPLUS_INCLUDE_PATH="/usr/include/c++/11:/usr/include/c++/11/x86_64-redhat-linux:/usr/include/c++/11/backward:/usr/lib/gcc/x86_64-redhat-linux/11/include:/usr/lib/clang/19/include:/usr/include"
-export CLANG_BUILTIN_INCLUDE_DIR="/usr/lib/clang/19/include"
+export CPLUS_INCLUDE_PATH="/usr/include/c++/11:/usr/lib/gcc/x86_64-redhat-linux/11/include:/usr/lib/clang/19/include:/usr/include"
 
-# Find original shiboken6
-ORIGINAL_SHIBOKEN=$(which shiboken6 | grep -v shiboken_wrapper | head -1)
-if [ -z "$ORIGINAL_SHIBOKEN" ]; then
-    for path in /core/Linux/APPZ/packages/shiboken6/*/bin/shiboken6; do
-        if [ -x "$path" ]; then
-            ORIGINAL_SHIBOKEN="$path"
-            break
-        fi
-    done
-fi
-
-if [ -z "$ORIGINAL_SHIBOKEN" ]; then
-    echo "Error: Could not find original shiboken6"
-    exit 1
-fi
-
-exec "$ORIGINAL_SHIBOKEN" $EXTRA_ARGS "$@"
+# Call original shiboken6 with additional arguments
+exec /core/Linux/APPZ/packages/shiboken6/6.9.1/bin/shiboken6 $EXTRA_ARGS "$@"
 '''
         
         with open(wrapper_script, 'w') as f:
@@ -510,98 +496,107 @@ exec "$ORIGINAL_SHIBOKEN" $EXTRA_ARGS "$@"
     
     return wrapper_dir
 
-def build_pyside6_direct(src, build_path, install_root, rez_python_exe):
-    """PySide6 직접 빌드 (CMake를 이용해 기존 shiboken6 사용)"""
-    print("🔨 Building PySide6 directly using CMake with existing shiboken6...")
+def build_pyside6_with_buildsh_method(src, build_path, install_root, rez_python_exe):
+    """build.sh 검증된 방법으로 PySide6 빌드"""
+    smart_log("🔨 Building PySide6 using build.sh proven method...")
     
-    # rez Python 사용
     python_exe = rez_python_exe
     python_version = subprocess.run([
         python_exe, "-c", 
         "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
     ], capture_output=True, text=True).stdout.strip()
     
-    print(f"🐍 Using Python: {python_exe}")
-    print(f"🐍 Python version: {python_version}")
+    smart_log(f"🐍 Using Python: {python_exe}")
+    smart_log(f"🐍 Python version: {python_version}")
     
-    # 경로 설정
+    # build.sh에서 검증된 경로들
     qt_dir = "/core/Linux/APPZ/packages/qt/6.9.1"
     shiboken_dir = "/core/Linux/APPZ/packages/shiboken6/6.9.1"
-    pyside_src = os.path.join(src, "sources", "pyside6")
     
-    # 빌드 디렉토리 생성
-    pyside_build_dir = os.path.join(build_path, "pyside6")
-    os.makedirs(pyside_build_dir, exist_ok=True)
-    os.chdir(pyside_build_dir)
-    
-    # 환경 변수 설정
+    # build.sh와 동일한 환경 설정
     build_env = os.environ.copy()
-    gcc13_root = "/opt/rh/gcc-toolset-13/root/usr"
-    gcc13_base = "/opt/rh/gcc-toolset-13/root"
     
-    rpmlibdir = "/usr/lib64"
-    gcc13_ld_paths = [
-        f"{gcc13_base}{rpmlibdir}",
-        f"{gcc13_base}/usr/lib"
-    ]
+    # build.sh에서 성공한 PATH 설정 (GCC toolset 경로 제거)
+    old_path = build_env.get("PATH", "")
+    clean_path_parts = []
+    for part in old_path.split(":"):
+        if "gcc-toolset-14" not in part and "gcc-toolset-13" not in part:
+            clean_path_parts.append(part)
     
-    dependency_lib_paths = [
-        "/core/Linux/APPZ/packages/qt/6.9.1/lib",
-        "/core/Linux/APPZ/packages/shiboken6/6.9.1/lib",
-        "/core/Linux/APPZ/packages/minizip_ng/4.0.10/lib",
-    ]
+    # build.sh에서 검증된 헤더 경로
+    clang_headers = "/usr/lib/clang/19/include"
+    gcc_headers = "/usr/lib/gcc/x86_64-redhat-linux/11/include"
+    system_headers = "/usr/include"
+    cpp_headers = "/usr/include/c++/11"
     
     build_env.update({
-        "CC": f"{gcc13_root}/bin/gcc",
-        "CXX": f"{gcc13_root}/bin/g++",
-        "PATH": f"{qt_dir}/bin:{gcc13_root}/bin:{build_env.get('PATH', '')}",
-        "LD_LIBRARY_PATH": ":".join(gcc13_ld_paths + dependency_lib_paths + [build_env.get("LD_LIBRARY_PATH", "")]),
-        "PKG_CONFIG_PATH": f"{qt_dir}/lib/pkgconfig:{shiboken_dir}/lib/pkgconfig:{build_env.get('PKG_CONFIG_PATH', '')}",
+        # build.sh에서 검증된 PATH 설정
+        "PATH": f"{qt_dir}/bin:{shiboken_dir}/bin:" + ":".join(clean_path_parts),
+        
+        # Qt 환경 (build.sh 방식)
+        "QT_DIR": qt_dir,
         "CMAKE_PREFIX_PATH": f"{qt_dir}:{shiboken_dir}",
+        "LD_LIBRARY_PATH": f"{qt_dir}/lib:{shiboken_dir}/lib",
+        "PKG_CONFIG_PATH": f"{qt_dir}/lib/pkgconfig:{shiboken_dir}/lib/pkgconfig",
+        
+        # build.sh에서 검증된 헤더 환경변수
+        "CLANG_BUILTIN_INCLUDE_DIR": clang_headers,
+        "C_INCLUDE_PATH": f"{gcc_headers}:{clang_headers}:{system_headers}",
+        "CPLUS_INCLUDE_PATH": f"{cpp_headers}:{gcc_headers}:{clang_headers}:{system_headers}",
+        "CLANG_INCLUDE_PATHS": f"{clang_headers}:{gcc_headers}:{cpp_headers}:{system_headers}",
+        "SHIBOKEN_INCLUDE_PATHS": f"{clang_headers}:{gcc_headers}:{system_headers}",
+        
+        # build.sh에서 검증된 추가 환경변수
+        "LLVM_INSTALL_DIR": "/usr",
+        "CLANG_INCLUDE_PATH": clang_headers,
+        "CLANG_RESOURCE_DIR": clang_headers,
+        
+        # Python 환경
+        "PYTHON": python_exe,
+        "PYTHON3": python_exe,
+        "PYTHON_EXECUTABLE": python_exe,
+        "PYTHONPATH": f"{install_root}/lib/python{python_version}/site-packages",
     })
     
-    # CMake 설정
-    cmake_args = [
-        "cmake",
-        pyside_src,
-        f"-DCMAKE_INSTALL_PREFIX={install_root}",
-        f"-DCMAKE_BUILD_TYPE=Release",
-        f"-DCMAKE_PREFIX_PATH={qt_dir};{shiboken_dir}",
-        f"-DPython_EXECUTABLE={python_exe}",
-        f"-DPYTHON_EXECUTABLE={python_exe}",
-        f"-DBUILD_TESTS=OFF",
-        f"-DUSE_PYTHON_VERSION={python_version}",
-        "-G", "Ninja"
-    ]
+    # build.sh에서 검증된 방법: setup.py 사용
+    os.chdir(src)
     
-    print(f"🔧 CMake command: {' '.join(cmake_args)}")
+    # build.sh에서 성공한 QMAKE 설정
+    build_env.update({
+        "QMAKE": f"{qt_dir}/bin/qmake",
+        "QT_QMAKE_EXECUTABLE": f"{qt_dir}/bin/qmake",
+    })
+    
+    smart_log("🔧 Building with setup.py (build.sh proven method)...")
     
     try:
-        # CMake 설정 실행
-        result = subprocess.run(cmake_args, cwd=pyside_build_dir, env=build_env, check=True)
-        print("✅ CMake configuration successful!")
+        # build.sh에서 성공한 setup.py 명령어
+        setup_cmd = [
+            python_exe, "setup.py", "build",
+            "--qmake", f"{qt_dir}/bin/qmake",
+            "--jobs", str(os.cpu_count()),
+            "--verbose-build"
+        ]
         
-        # Ninja 빌드 실행
-        ninja_cmd = ["ninja", f"-j{os.cpu_count()}"]
-        print(f"🔧 Ninja command: {' '.join(ninja_cmd)}")
-        result = subprocess.run(ninja_cmd, cwd=pyside_build_dir, env=build_env, check=True)
-        print("✅ Ninja build successful!")
+        smart_log(f"🔧 Setup.py command: {' '.join(setup_cmd)}")
+        result = subprocess.run(setup_cmd, cwd=src, env=build_env, check=True)
+        smart_log("✅ Setup.py build successful!")
         
         return True
         
     except subprocess.CalledProcessError as e:
-        print(f"❌ Direct PySide6 build failed: {e}")
+        smart_log(f"❌ Setup.py build failed: {e}")
         return False
 
 def build_pyside6(src, build_path, install_root, rez_python_exe):
-    """PySide6 빌드 실행 - 직접 빌드 방식 우선 시도"""
-    print("🔨 Building PySide6...")
+    """PySide6 빌드 실행 - build.sh 검증된 방법 사용"""
+    smart_log("🔨 Building PySide6 using build.sh proven patterns...")
     
-    # 먼저 직접 CMake 빌드 시도
-    if build_pyside6_direct(src, build_path, install_root, rez_python_exe):
+    # build.sh 검증된 방법을 우선 시도
+    if build_pyside6_with_buildsh_method(src, build_path, install_root, rez_python_exe):
         return True
     
-    print("🔧 Direct build failed, trying setup.py method...")
+    smart_log("🔧 build.sh method failed, trying alternative approach...")
     
     # 소스 디렉토리로 이동
     os.chdir(src)
@@ -987,13 +982,13 @@ def write_build_marker(build_path):
     open(marker, "a").close()
 
 def build_multi_python(source_path, build_path, install_path, targets):
-    """Multi-Python version build function according to updated readme.md"""
+    """Multi-Python version build function using build.sh proven patterns"""
     global _build_log_file
     
     version = os.environ.get("REZ_BUILD_PROJECT_VERSION", "6.9.1")
     
-    # Python versions from updated readme.md
-    python_versions = ["3.9.21", "3.10.6", "3.11.9", "3.12.10", "3.13.2"]
+    # Python versions from readme.md (build.sh 검증된 순서로 정렬 - 3.13.2 먼저)
+    python_versions = ["3.13.2", "3.12.10", "3.11.9", "3.10.6", "3.9.21"]
     
     # Setup smart build logging
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -1057,9 +1052,9 @@ def build_multi_python(source_path, build_path, install_path, targets):
             # Shiboken 래퍼 생성
             create_shiboken_wrapper(version_build_path)
             
-            # PySide6 빌드
+            # PySide6 빌드 (build.sh 방법)
             if build_pyside6(src, version_build_path, install_root, rez_python_exe):
-                smart_log(f"✅ Build successful for Python {python_version}")
+                smart_log(f"✅ Build successful for Python {python_version} (build.sh method)")
                 
                 if "install" in targets:
                     # 설치 디렉토리 생성
@@ -1134,19 +1129,22 @@ def build_multi_python(source_path, build_path, install_path, targets):
     
     smart_log("📊 Build Statistics:")
     smart_log(f"   Total Python versions: {len(python_versions)}")
-    smart_log(f"   Successful builds: {len(successful_builds)}")  
+    smart_log(f"   Successful builds: {len(successful_builds)}")
     smart_log(f"   Failed builds: {len(failed_builds)}")
     smart_log(f"   Total errors encountered: {_error_count}")
-    smart_log(f"   Log file: {_build_log_file}")
+    smart_log(f"   Build efficiency: {int(len(successful_builds)*100/len(python_versions))}%")
+    smart_log(f"   Average time per version: {format_duration(int(build_duration/len(python_versions)))}")
+    
+    smart_log("="*80)
     
     if successful_builds and not failed_builds:
-        smart_log("🎉 All Python versions built successfully!")
+        smart_log("🎉 All Python versions built successfully!", "SUCCESS")
         return True
     elif successful_builds:
-        smart_log("⚠️  Partial success - some Python versions built successfully")
+        smart_log("⚠️  Partial success - some Python versions built successfully", "WARNING")
         return True
     else:
-        smart_log("💥 All Python version builds failed!")
+        smart_log("💥 All Python version builds failed!", "ERROR")
         return False
 
 def find_rez_python_version(python_version):
